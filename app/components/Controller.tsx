@@ -96,7 +96,7 @@ export default function Controller() {
       const res = await fetch('/api/wake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mac: normalizedMac }),
+        body: JSON.stringify({ mac: normalizedMac, address: host }),
       });
       const data = await res.json();
       if (res.ok) {

@@ -3,8 +3,8 @@ import wol from 'wakeonlan';
 
 export async function POST(req: NextRequest) {
   try {
-    const { mac } = await req.json();
-
+    const { mac, address } = await req.json();
+    
     if (!mac) {
       return NextResponse.json({ error: 'MAC address is required' }, { status: 400 });
     }
@@ -18,11 +18,16 @@ export async function POST(req: NextRequest) {
     // Normalize for the 'wol' library (it usually expects colons)
     const normalizedMac = mac.replace(/[:-]/g, '').match(/.{1,2}/g)?.join(':') || mac;
 
-    console.log(`Sending WOL magic packet to: ${normalizedMac}`);
-    await wol(normalizedMac);
+    const options: any = {};
+    if (address) {
+      options.address = address;
+    }
+
+    console.log(`Sending WOL magic packet to: ${normalizedMac} (Target: ${address || 'broadcast'})`);
+    await wol(normalizedMac, options);
     console.log(`WOL packet successfully dispatched to ${normalizedMac}`);
 
-    return NextResponse.json({ message: `Wake-on-LAN packet sent to ${mac}` });
+    return NextResponse.json({ message: `Wake-on-LAN packet sent to ${normalizedMac} ${address ? 'via ' + address : ''}` });
   } catch (error: any) {
     console.error('WOL Error stack:', error.stack || error);
     return NextResponse.json({ error: error.message || 'Failed to send WOL packet' }, { status: 500 });
