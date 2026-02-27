@@ -7,6 +7,8 @@ export default function Controller() {
   const [mac, setMac] = useState('');
   const [host, setHost] = useState('');
   const [status, setStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+  const [latency, setLatency] = useState<number | null>(null);
+  const [lastSeen, setLastSeen] = useState<Date | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [showConfig, setShowConfig] = useState(false);
@@ -58,7 +60,14 @@ export default function Controller() {
         body: JSON.stringify({ host }),
       });
       const data = await res.json();
-      setStatus(data.alive ? 'online' : 'offline');
+      if (data.alive) {
+        setStatus('online');
+        setLatency(data.time);
+        setLastSeen(new Date());
+      } else {
+        setStatus('offline');
+        setLatency(null);
+      }
     } catch (error) {
       console.error('Status check failed:', error);
       setStatus('offline');
@@ -106,7 +115,14 @@ export default function Controller() {
         <h1 className="gradient-text">PC Controller</h1>
         <div className={`${styles.statusBadge} ${styles[status]}`}>
           <span className={styles.statusDot}></span>
-          {status === 'checking' ? 'Checking...' : status.toUpperCase()}
+          <div className={styles.statusInfo}>
+            <span className={styles.statusLabel}>
+              {status === 'checking' ? 'Checking...' : status.toUpperCase()}
+            </span>
+            {status === 'online' && latency !== null && (
+              <span className={styles.latency}>{latency}ms</span>
+            )}
+          </div>
         </div>
       </header>
 
@@ -127,6 +143,11 @@ export default function Controller() {
           <p className={styles.instruction}>
             {status === 'online' ? 'PC is Online' : 'Tap to Power On'}
           </p>
+          {lastSeen && status === 'offline' && (
+            <p className={styles.lastSeen}>
+              Last seen: {lastSeen.toLocaleTimeString()}
+            </p>
+          )}
         </div>
 
         {message && <div className={styles.message}>{message}</div>}
