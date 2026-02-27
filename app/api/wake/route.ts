@@ -23,30 +23,41 @@ export async function POST(req: NextRequest) {
       options.address = address;
     }
 
-    console.log(`Sending WOL magic packet to: ${normalizedMac} (Target: ${address || 'broadcast'})`);
+    console.log(`[WOL] Target MAC: ${normalizedMac}`);
+    console.log(`[WOL] Primary target address: ${address || '255.255.255.255'}`);
     
     try {
+      // Try primary send (either provided address or default broadcast)
       await wol(normalizedMac, options);
+      console.log(`[WOL] Packet successfully sent to ${address || 'broadcast'}`);
     } catch (sendError: any) {
-      console.error(`Initial WOL send failed for ${address || 'broadcast'}:`, sendError.message);
+      console.error(`[WOL] Primary send failed: ${sendError.message} (Code: ${sendError.code})`);
       
-      // If we tried a specific address and it failed (like EPERM on Windows), fallback to broadcast
-      if (address && address !== '255.255.255.255') {
-        console.log(`Attempting fallback broadcast for ${normalizedMac}...`);
-        await wol(normalizedMac, { ...options, address: '255.255.255.255' });
-        return NextResponse.json({ 
-          message: `Wake-on-LAN packet sent to ${normalizedMac} via broadcast (Direct send to ${address} failed)`,
-          warning: `Direct send to ${address} failed with: ${sendError.message}. Fell back to broadcast.`
-        });
+      // Fallback Strategy for Windows EPERM or network restrictions
+      const fallbacks = ['255.255.255.255', '192.168.1.255'];
+      
+      for (const fallbackAddr of fallbacks) {
+        if (address === fallbackAddr) continue; // Skip if we already tried this
+        
+        try {
+          console.log(`[WOL] Attempting fallback broadcast to: ${fallbackAddr}...`);
+          await wol(normalizedMac, { ...options, address: fallbackAddr });
+          console.log(`[WOL] Fallback successful via ${fallbackAddr}`);
+          return NextResponse.json({ 
+            message: `Wake-on-LAN packet sent to ${normalizedMac} via fallback ${fallbackAddr}`,
+            warning: `Primary send to ${address || 'default'} failed: ${sendError.message}`
+          });
+        } catch (fallbackError: any) {
+          console.error(`[WOL] Fallback to ${fallbackAddr} failed: ${fallbackError.message}`);
+        }
       }
-      throw sendError; // Re-throw if it wasn't a specific address or if broadcast also fails
+      
+      throw sendError; // If everything fails, throw the original error
     }
 
-    console.log(`WOL packet successfully dispatched to ${normalizedMac}`);
-
-    return NextResponse.json({ message: `Wake-on-LAN packet sent to ${normalizedMac} ${address ? 'via ' + address : ''}` });
+    return NextResponse.json({ message: `Wake-on-LAN packet sent to ${normalizedMac}` });
   } catch (error: any) {
-    console.error('WOL Error stack:', error.stack || error);
+    console.error('[WOL] Final error handler:', error);
     return NextResponse.json({ 
       error: error.message || 'Failed to send WOL packet',
       code: error.code
