@@ -10,6 +10,8 @@ export default function Controller() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [showConfig, setShowConfig] = useState(false);
+  const [showTroubleshooting, setShowTroubleshooting] = useState(false);
+  const [macError, setMacError] = useState('');
 
   // Load config from localStorage
   useEffect(() => {
@@ -22,7 +24,22 @@ export default function Controller() {
     }
   }, []);
 
+  const validateMac = (value: string) => {
+    const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+    if (!value) {
+      setMacError('');
+      return true;
+    }
+    if (!macRegex.test(value)) {
+      setMacError('Format: 00:11:22:33:44:55');
+      return false;
+    }
+    setMacError('');
+    return true;
+  };
+
   const saveConfig = () => {
+    if (!validateMac(mac)) return;
     localStorage.setItem('pc-mac', mac);
     localStorage.setItem('pc-host', host);
     setShowConfig(false);
@@ -130,8 +147,13 @@ export default function Controller() {
                 type="text" 
                 placeholder="00:11:22:33:44:55" 
                 value={mac}
-                onChange={(e) => setMac(e.target.value)}
+                className={macError ? styles.inputError : ''}
+                onChange={(e) => {
+                  setMac(e.target.value);
+                  validateMac(e.target.value);
+                }}
               />
+              {macError && <span className={styles.errorText}>{macError}</span>}
             </div>
             <div className={styles.inputGroup}>
               <label>Host (IP or Hostname)</label>
@@ -143,8 +165,27 @@ export default function Controller() {
               />
             </div>
             <button className={styles.saveButton} onClick={saveConfig}>
-              Save Logic
+              Save Config
             </button>
+          </div>
+        )}
+
+        <button 
+          className={styles.troubleToggle}
+          onClick={() => setShowTroubleshooting(!showTroubleshooting)}
+        >
+          {showTroubleshooting ? 'Hide Help' : 'Not working? Troubleshooting'}
+        </button>
+
+        {showTroubleshooting && (
+          <div className={`${styles.troubleshooting} glass`}>
+            <h3>Quick Fixes</h3>
+            <ul>
+              <li><strong>BIOS/UEFI:</strong> Enable &quot;Wake on LAN&quot; or &quot;Power on by PCIe&quot;. Disable &quot;ErP Ready&quot;.</li>
+              <li><strong>Windows:</strong> In Device Manager, Ethernet Properties &gt; Power Management, check &quot;Allow this device to wake the computer&quot;.</li>
+              <li><strong>Fast Startup:</strong> Disable Windows &quot;Fast Startup&quot; in Power Options.</li>
+              <li><strong>Physical Address:</strong> Use <code>ipconfig /all</code> in CMD to get your MAC address.</li>
+            </ul>
           </div>
         )}
       </div>

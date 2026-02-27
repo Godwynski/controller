@@ -15,11 +15,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid MAC address format' }, { status: 400 });
     }
 
+    console.log(`Sending WOL magic packet to: ${mac}`);
     await wol(mac);
+    console.log(`WOL packet successfully dispatched to ${mac}`);
 
     return NextResponse.json({ message: `Wake-on-LAN packet sent to ${mac}` });
   } catch (error: any) {
-    console.error('WOL Error:', error);
+    console.error('WOL Error stack:', error.stack || error);
     return NextResponse.json({ error: error.message || 'Failed to send WOL packet' }, { status: 500 });
   }
 }
