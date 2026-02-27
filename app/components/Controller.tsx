@@ -7,6 +7,8 @@ export default function Controller() {
   const [mac, setMac] = useState('');
   const [host, setHost] = useState('');
   const [status, setStatus] = useState<'online' | 'offline' | 'checking'>('checking');
+  const [latency, setLatency] = useState<number | null>(null);
+  const [lastSeen, setLastSeen] = useState<Date | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [showConfig, setShowConfig] = useState(false);
@@ -25,13 +27,14 @@ export default function Controller() {
   }, []);
 
   const validateMac = (value: string) => {
-    const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
     if (!value) {
       setMacError('');
       return true;
     }
+    // Relaxed regex: 12 hex chars with optional colons or hyphens
+    const macRegex = /^([0-9A-Fa-f]{2}[:-]?){5}([0-9A-Fa-f]{2})$/;
     if (!macRegex.test(value)) {
-      setMacError('Format: 00:11:22:33:44:55');
+      setMacError('Invalid format (e.g. 00:11:22:33:44:55)');
       return false;
     }
     setMacError('');
@@ -58,7 +61,14 @@ export default function Controller() {
         body: JSON.stringify({ host }),
       });
       const data = await res.json();
-      setStatus(data.alive ? 'online' : 'offline');
+      if (data.alive) {
+        setStatus('online');
+        setLatency(data.time);
+        setLastSeen(new Date());
+      } else {
+        setStatus('offline');
+        setLatency(null);
+      }
     } catch (error) {
       console.error('Status check failed:', error);
       setStatus('offline');
@@ -79,11 +89,14 @@ export default function Controller() {
     }
     setLoading(true);
     setMessage('');
+    // Normalize MAC address for sending (remove any delimiters)
+    const normalizedMac = mac.replace(/[:-]/g, '').toLowerCase();
+
     try {
       const res = await fetch('/api/wake', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mac }),
+        body: JSON.stringify({ mac: normalizedMac }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -106,7 +119,14 @@ export default function Controller() {
         <h1 className="gradient-text">PC Controller</h1>
         <div className={`${styles.statusBadge} ${styles[status]}`}>
           <span className={styles.statusDot}></span>
-          {status === 'checking' ? 'Checking...' : status.toUpperCase()}
+          <div className={styles.statusInfo}>
+            <span className={styles.statusLabel}>
+              {status === 'checking' ? 'Checking...' : status.toUpperCase()}
+            </span>
+            {status === 'online' && latency !== null && (
+              <span className={styles.latency}>{latency}ms</span>
+            )}
+          </div>
         </div>
       </header>
 
@@ -127,6 +147,11 @@ export default function Controller() {
           <p className={styles.instruction}>
             {status === 'online' ? 'PC is Online' : 'Tap to Power On'}
           </p>
+          {lastSeen && status === 'offline' && (
+            <p className={styles.lastSeen}>
+              Last seen: {lastSeen.toLocaleTimeString()}
+            </p>
+          )}
         </div>
 
         {message && <div className={styles.message}>{message}</div>}

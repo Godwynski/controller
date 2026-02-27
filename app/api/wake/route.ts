@@ -9,15 +9,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'MAC address is required' }, { status: 400 });
     }
 
-    // Validate MAC address format (basic)
-    const macRegex = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+    // Validate MAC address format (flexible: supports 12 hex chars with optional delimiters)
+    const macRegex = /^([0-9A-Fa-f]{2}[:-]?){5}([0-9A-Fa-f]{2})$/;
     if (!macRegex.test(mac)) {
       return NextResponse.json({ error: 'Invalid MAC address format' }, { status: 400 });
     }
 
-    console.log(`Sending WOL magic packet to: ${mac}`);
-    await wol(mac);
-    console.log(`WOL packet successfully dispatched to ${mac}`);
+    // Normalize for the 'wol' library (it usually expects colons)
+    const normalizedMac = mac.replace(/[:-]/g, '').match(/.{1,2}/g)?.join(':') || mac;
+
+    console.log(`Sending WOL magic packet to: ${normalizedMac}`);
+    await wol(normalizedMac);
+    console.log(`WOL packet successfully dispatched to ${normalizedMac}`);
 
     return NextResponse.json({ message: `Wake-on-LAN packet sent to ${mac}` });
   } catch (error: any) {
