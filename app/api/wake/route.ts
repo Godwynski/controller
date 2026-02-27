@@ -1,5 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import wol from 'wakeonlan';
+import os from 'os';
+
+/**
+ * Discovers all IPv4 broadcast addresses for all non-internal network interfaces.
+ */
+function getBroadcastAddresses(): string[] {
+  const interfaces = os.networkInterfaces();
+  const broadcasts = new Set<string>();
+  
+  // Always include global broadcast
+  broadcasts.add('255.255.255.255');
+  
+  for (const name of Object.keys(interfaces)) {
+    for (const net of interfaces[name] || []) {
+      if (net.family === 'IPv4' && !net.internal && net.netmask) {
+        try {
+          const ipParts = net.address.split('.').map(Number);
+          const maskParts = net.netmask.split('.').map(Number);
+          if (ipParts.length === 4 && maskParts.length === 4) {
+            const broadcastParts = ipParts.map((part, i) => (part | (~maskParts[i] & 255)));
+            broadcasts.add(broadcastParts.join('.'));
+          }
+        } catch (e) {
+          console.error(`[WOL] Failed to calculate broadcast for interface ${name}:`, e);
+        }
+      }
+    }
+  }
+  return Array.from(broadcasts);
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,58 +39,69 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'MAC address is required' }, { status: 400 });
     }
 
-    // Validate MAC address format (flexible: supports 12 hex chars with optional delimiters)
+    // Validate MAC address format
     const macRegex = /^([0-9A-Fa-f]{2}[:-]?){5}([0-9A-Fa-f]{2})$/;
     if (!macRegex.test(mac)) {
       return NextResponse.json({ error: 'Invalid MAC address format' }, { status: 400 });
     }
 
-    // Normalize for the 'wol' library (it usually expects colons)
+    // Normalize for the 'wol' library
     const normalizedMac = mac.replace(/[:-]/g, '').match(/.{1,2}/g)?.join(':') || mac;
 
-    const options: any = {};
-    if (address) {
-      options.address = address;
-    }
-
-    console.log(`[WOL] Target MAC: ${normalizedMac}`);
-    console.log(`[WOL] Primary target address: ${address || '255.255.255.255'}`);
+    console.log(`[WOL] Triggered for MAC: ${normalizedMac}`);
     
-    try {
-      // Try primary send (either provided address or default broadcast)
-      await wol(normalizedMac, options);
-      console.log(`[WOL] Packet successfully sent to ${address || 'broadcast'}`);
-    } catch (sendError: any) {
-      console.error(`[WOL] Primary send failed: ${sendError.message} (Code: ${sendError.code})`);
-      
-      // Fallback Strategy for Windows EPERM or network restrictions
-      const fallbacks = ['255.255.255.255', '192.168.1.255'];
-      
-      for (const fallbackAddr of fallbacks) {
-        if (address === fallbackAddr) continue; // Skip if we already tried this
-        
-        try {
-          console.log(`[WOL] Attempting fallback broadcast to: ${fallbackAddr}...`);
-          await wol(normalizedMac, { ...options, address: fallbackAddr });
-          console.log(`[WOL] Fallback successful via ${fallbackAddr}`);
-          return NextResponse.json({ 
-            message: `Wake-on-LAN packet sent to ${normalizedMac} via fallback ${fallbackAddr}`,
-            warning: `Primary send to ${address || 'default'} failed: ${sendError.message}`
-          });
-        } catch (fallbackError: any) {
-          console.error(`[WOL] Fallback to ${fallbackAddr} failed: ${fallbackError.message}`);
-        }
+    const broadcastAddresses = getBroadcastAddresses();
+    console.log(`[WOL] Discovered potential broadcast targets: ${broadcastAddresses.join(', ')}`);
+
+    const results: { address: string; success: boolean; error?: string }[] = [];
+
+    // Strategy: Attempt to send to the specifically requested host first if provided
+    if (address && !broadcastAddresses.includes(address)) {
+      try {
+        console.log(`[WOL] Attempting primary targeted send to: ${address}`);
+        await wol(normalizedMac, { address });
+        results.push({ address, success: true });
+        console.log(`[WOL] Targeted send to ${address} succeeded`);
+      } catch (err: any) {
+        console.warn(`[WOL] Targeted send to ${address} failed: ${err.message}`);
+        results.push({ address, success: false, error: err.message });
       }
-      
-      throw sendError; // If everything fails, throw the original error
     }
 
-    return NextResponse.json({ message: `Wake-on-LAN packet sent to ${normalizedMac}` });
+    // Then, attempt to send to ALL discovered broadcast addresses
+    // This ensures maximum reach in multihomed/bridged environments
+    for (const targetAddr of broadcastAddresses) {
+      try {
+        console.log(`[WOL] Dispatching to broadcast: ${targetAddr}...`);
+        await wol(normalizedMac, { address: targetAddr });
+        results.push({ address: targetAddr, success: true });
+        console.log(`[WOL] Dispatch to ${targetAddr} successful`);
+      } catch (err: any) {
+        // EPERM is common on Windows for certain interfaces (like APIPA 169.254.x.x)
+        console.error(`[WOL] Dispatch to ${targetAddr} failed: ${err.message} (Code: ${err.code})`);
+        results.push({ address: targetAddr, success: false, error: err.message });
+      }
+    }
+
+    const anySuccess = results.some(r => r.success);
+    
+    if (anySuccess) {
+      return NextResponse.json({ 
+        message: `Wake-on-LAN packets dispatched.`,
+        details: results 
+      });
+    } else {
+      const errorMsg = results.map(r => `${r.address}: ${r.error}`).join('; ');
+      return NextResponse.json({ 
+        error: `Failed to dispatch WOL magic packet to any target.`,
+        details: errorMsg
+      }, { status: 500 });
+    }
+
   } catch (error: any) {
-    console.error('[WOL] Final error handler:', error);
+    console.error('[WOL] Fatal error:', error);
     return NextResponse.json({ 
-      error: error.message || 'Failed to send WOL packet',
-      code: error.code
+      error: error.message || 'Internal server error during WOL'
     }, { status: 500 });
   }
 }
